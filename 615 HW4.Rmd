@@ -1,0 +1,210 @@
+---
+title: "615 HW4"
+author: "Yiming Chen"
+date: "2024-09-26"
+output:
+  pdf_document: default
+  html_document: default
+---
+##a
+```{r}
+library(data.table)
+library(lubridate)
+library(dplyr)
+
+file_root <- "https://www.ndbc.noaa.gov/view_text_file.php?filename=44013h"
+tail <- ".txt.gz&dir=data/historical/stdmet/"
+
+years <- 1985:2023
+
+buoy_data_list <- list()
+
+for (year in years) {
+  path <- paste0(file_root, year, tail)
+  header <- scan(path, what = 'character', nlines = 1)
+  skip_lines <- ifelse(year >= 2007, 2, 1)
+  buoy <- fread(path, header = FALSE, skip = skip_lines)
+  num_cols <- ncol(buoy)
+  if (length(header) > num_cols) {
+    header <- header[1:num_cols]
+  } else if (length(header) < num_cols) {
+    header <- c(header, paste0("V", (length(header) + 1):num_cols))
+  }
+  
+  colnames(buoy) <- header
+  
+  if ("YY" %in% colnames(buoy) & "MM" %in% colnames(buoy) & "DD" %in% colnames(buoy) & "hh" %in% colnames(buoy) & "mm" %in% colnames(buoy)) {
+    buoy$Date <- ymd_hms(paste(buoy$YY, buoy$MM, buoy$DD, buoy$hh, buoy$mm))
+  }
+  
+  buoy_data_list[[as.character(year)]] <- buoy
+}
+
+buoy_data_list <- rbindlist(buoy_data_list, fill = TRUE)
+
+# Merge the YY, YYYY, and #YY columns into one (if any of them exist)
+buoy_data_list <- buoy_data_list %>%
+  mutate(Year = coalesce(as.numeric(YY), as.numeric(YYYY), as.numeric(`#YY`))) %>%
+  select(-YY, -YYYY, -`#YY`) %>%
+  select(Year, everything())
+
+# Adjust year format for years between 85 and 98
+buoy_data_list <- buoy_data_list %>%
+  mutate(Year = ifelse(Year < 100, ifelse(Year >= 85, 1900 + Year, 2000 + Year), Year))
+
+# Merge WD and WDIR columns into one
+buoy_data_list <- buoy_data_list %>%
+  mutate(Wind_Direction = coalesce(WD, WDIR)) %>%
+  select(-WD, -WDIR)
+
+# Merge BAR and PRES columns into one
+buoy_data_list <- buoy_data_list %>%
+  mutate(Pressure = coalesce(BAR, PRES)) %>%
+  select(-BAR, -PRES)
+
+# Create a proper date column if possible
+if (all(c("Year", "MM", "DD", "hh") %in% colnames(buoy_data_list))) {
+  buoy_data_list[, date := make_datetime(Year, MM, DD, hh)]
+} else if (all(c("Year", "MM", "DD", "hh") %in% colnames(buoy_data_list))) {
+  buoy_data_list[, date := make_datetime(Year, MM, DD, hh)]
+}
+
+buoy_data_list <- buoy_data_list %>% select(date, everything())
+
+str(buoy_data_list)
+
+```
+##b
+```{r}
+library(tidyverse)
+# Convert 999 values to NA for WDIR and other relevant columns
+buoy_data_list <- buoy_data_list %>%
+  mutate(across(everything(), ~ replace(.x, .x == 999, NA))) %>% 
+  mutate(across(everything(), ~ replace(.x, .x == 99, NA)))
+
+# Create a summary of missing values in each column
+missing_summary <- sapply(buoy_data_list, function(x) sum(is.na(x)))
+print(missing_summary)
+
+# Basic visualization of missing values
+barplot(missing_summary, main = "Missing Values by Variable", ylab = "Number of Missing Values", 
+        names.arg = names(missing_summary), las = 2, col = "lightblue")
+# Extract year from date if not already present
+buoy_data_list[, Year := year(date)]
+
+# Check missing data by year
+missing_by_year <- buoy_data_list %>%
+  group_by(Year) %>%
+  summarise(across(everything(), ~ sum(is.na(.), na.rm = TRUE)))
+
+# Print missing data by year summary
+print(missing_by_year)
+```
+No, it is not always appropriate to convert missing data to NA automatically. 
+If 999 represents a placeholder for missing or invalid data, it should be converted to NA. 
+While 999 might represent a specific or extreme value rather than a placeholder for missing data. 
+Yes, some patterns are spotted in the way/dates that these are distributed.
+From 1985 to 2005, there were many missing observations, showing that data collection methods were less reliable compared to 2005 to 2023. The fewer missing observations from 2005 to 2023 suggest that data collection improved or more was invested in buoy technology.
+
+
+##c
+```{r}
+# Ensure necessary libraries are loaded
+library(ggplot2)
+library(dplyr)
+
+summary_data <- buoy_data_list %>% 
+  group_by(Year) %>%
+  summarise(avg_atmp = mean(ATMP, na.rm = TRUE), groups = 'drop')
+
+ggplot(summary_data, aes(x = Year, y = avg_atmp)) + 
+  geom_line (color = "skyblue") +
+  geom_smooth(method = "loess", se = FALSE, color = "blue" ) +
+  labs(title = "Air Temperature Over Time",
+x = "Year", y = "Air Temperature")
+
+```
+__Trend:__ There is a slight upward trend in air temperature, particularly after the year 2000. This could potentially indicate warming, which may be tied to climate change.
+__Fluctuations:__ The data shows a number of fluctuations, especially in the 1990s, followed by a more consistent trend around the mid-2000s.
+__Recent Data:__ The tail end of the data (near 2020) shows a notable decrease, which could be due to various factors, including localized weather events or possible missing/incomplete data.
+There is evidence of a warming trend over the study period, especially in recent decades.Despite short-term fluctuations, the overall long-term trend points to rising temperatures.The recent dip should be explored further, but overall, the warming trend dominates the period from 1985 to 2020.
+
+
+```{r}
+model = lm(avg_atmp ~ Year, data = summary_data)
+summary(model)
+```
+Year Coefficient: 0.04209 means that for each additional year, the average air temperature increases by approximately 0.04209 units.
+
+This positive coefficient suggests a gradual warming trend over time. Each year is associated with a rise in the average air temperature by about 0.042 degrees.
+
+Because the p-value for this coefficient is 0.0472, which is less than 0.05, this increase is statistically significant at the 95% confidence level. Thus, we can confidently say that the average air temperature has been rising over the years based on this model.
+
+##d
+###1)
+```{r}
+library(dplyr)
+library(ggplot2)
+
+rainfall <- read_csv("~/Desktop/MA615/hw4/Rainfall.csv")
+
+rainfall <- rainfall %>%
+  rename(date = DATE)
+
+combined_data <- left_join(rainfall, buoy_data_list, by = "date")
+
+# Summary statistics for rainfall and key buoy variables
+summary_combined <- combined_data %>%
+  summarise(
+    Mean_Rainfall = mean(HPCP, na.rm = TRUE),
+    Median_Rainfall = median(HPCP, na.rm = TRUE),
+    Max_Rainfall = max(HPCP, na.rm = TRUE),
+    Min_Rainfall = min(HPCP, na.rm = TRUE),
+    Mean_Temperature = mean(WTMP, na.rm = TRUE),
+    Mean_Pressure = mean(Pressure, na.rm = TRUE)
+  )
+summary_combined
+
+```
+
+###2)
+```{r}
+# Histogram for Rainfall
+ggplot(combined_data, aes(x = HPCP)) +
+  geom_histogram(binwidth = 0.05, fill = "blue", color = "black") +
+  labs(title = "Distribution of Rainfall", x = "Rainfall (inches)", y = "Count")
+
+ggplot(combined_data, aes(x = WTMP, y = HPCP)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm", color = "blue") +
+  labs(title = "Rainfall vs. Water Temperature", x = "Water Temperature (°C)", y = "Rainfall (inches)")
+
+ggplot(combined_data, aes(x = cut(WTMP, breaks = 5), y = HPCP)) +
+  geom_boxplot(fill = "lightblue") +
+  labs(title = "Rainfall by Water Temperature", x = "Water Temperature Bins", y = "Rainfall (inches)") +
+  theme_minimal()
+
+```
+__1. Distribution of Rainfall (Histogram):__
+This is a common pattern for rainfall data, where the majority of time periods may experience little to no rain, while a few periods record heavy rainfall. The distribution is right-skewed, indicating that larger rainfall events are rare.
+__2. Rainfall vs. Water Temperature (Scatter Plot):__
+The relationship between water temperature and rainfall appears to be weak based on the scatter plot and regression line. However, the overall spread and density of points suggest that other factors may also be influencing rainfall events.
+__3. Rainfall by Water Temperature (Boxplot):__
+The boxplot indicates that large rainfall events (outliers) are possible at all temperature ranges, though they are more frequent at higher water temperatures. However, the overall median rainfall remains low in each bin, indicating that temperature alone may not be a strong predictor of rainfall magnitude.
+
+###3)
+
+```{r}
+cleaned_data <- combined_data %>%
+  filter(!is.na(HPCP), !is.na(WTMP),!is.na(Pressure))
+
+simple_model <- lm(HPCP ~ WTMP + Pressure, data = cleaned_data)
+
+summary(simple_model)
+```
+Despite the significance of the predictors, the $R^2$ value is low, indicating that rainfall prediction is difficult. Many factors, including non-linear relationships, local effects, and sudden weather events, may not be fully explained by a simple model. However, even with complex models, predicting rain accurately involves dealing with chaotic systems. As seen in our simple linear model, we may observe some patterns, but the accuracy is far from perfect. This highlights how challenging it can be to predict the weather, even with modern technology and data, leading to more understanding of why forecasts can sometimes be inaccurate.
+
+
+
+
+
