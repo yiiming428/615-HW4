@@ -204,7 +204,7 @@ summary(simple_model)
 ```
 Despite the significance of the predictors, the $R^2$ value is low, indicating that rainfall prediction is difficult. Many factors, including non-linear relationships, local effects, and sudden weather events, may not be fully explained by a simple model. However, even with complex models, predicting rain accurately involves dealing with chaotic systems. As seen in our simple linear model, we may observe some patterns, but the accuracy is far from perfect. This highlights how challenging it can be to predict the weather, even with modern technology and data, leading to more understanding of why forecasts can sometimes be inaccurate.
 
-
+Credit to Haoran Cui and Ruijian (Maggie) Lin.
 
 
 
